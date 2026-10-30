@@ -1,0 +1,39 @@
+name: Rhythm platform test
+
+# Runs on GitHub's own Windows and Mac machines. Test only: a fresh, empty
+# browser profile, a test extension with no network access, no secrets.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / ${{ matrix.browser }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, browser: chrome-for-testing }
+          - { os: windows-latest, browser: chrome }
+          - { os: windows-latest, browser: edge }
+          - { os: macos-latest, browser: chrome-for-testing }
+          - { os: macos-latest, browser: chrome }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run the test
+        run: python scripts/run_test.py --browser ${{ matrix.browser }}
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.os }}-${{ matrix.browser }}
+          path: results/
+          if-no-files-found: warn

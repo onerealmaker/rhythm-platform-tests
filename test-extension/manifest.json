@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "Rhythm platform test",
+  "description": "Test only. Records every 30 seconds, on this machine, whether it is running and whether the computer is in use. No network access.",
+  "version": "0.1.0",
+  "minimum_chrome_version": "120",
+  "background": { "service_worker": "sw.js" },
+  "permissions": ["background", "idle", "alarms", "storage"]
+}
