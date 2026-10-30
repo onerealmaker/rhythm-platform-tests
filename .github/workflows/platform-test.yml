@@ -1,7 +1,7 @@
 name: Rhythm platform test
 
-# Runs on GitHub's own Windows and Mac machines. Test only: a fresh, empty
-# browser profile, a test extension with no network access, no secrets.
+# Runs on GitHub's own Windows and Mac machines. Test only: a test extension
+# with no network access, no secrets. Results appear as annotations on the run.
 on:
   push:
   workflow_dispatch:
@@ -11,29 +11,30 @@ permissions:
 
 jobs:
   test:
-    name: ${{ matrix.os }} / ${{ matrix.browser }}
+    name: ${{ matrix.os }} / ${{ matrix.browser }} / ${{ matrix.mode }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: windows-latest, browser: chrome-for-testing }
-          - { os: windows-latest, browser: chrome }
-          - { os: windows-latest, browser: edge }
-          - { os: macos-latest, browser: chrome-for-testing }
-          - { os: macos-latest, browser: chrome }
+          - { os: windows-latest, browser: chrome-for-testing, mode: standard }
+          - { os: windows-latest, browser: edge, mode: standard }
+          - { os: windows-latest, browser: chrome-for-testing, mode: signin }
+          - { os: windows-latest, browser: edge, mode: signin }
+          - { os: macos-latest, browser: chrome-for-testing, mode: standard }
+          - { os: macos-latest, browser: edge, mode: standard }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Run the test
-        run: python scripts/run_test.py --browser ${{ matrix.browser }}
+        run: python scripts/run_test.py --browser ${{ matrix.browser }} --mode ${{ matrix.mode }}
       - name: Keep the results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: results-${{ matrix.os }}-${{ matrix.browser }}
+          name: results-${{ matrix.os }}-${{ matrix.browser }}-${{ matrix.mode }}
           path: results/
           if-no-files-found: warn
