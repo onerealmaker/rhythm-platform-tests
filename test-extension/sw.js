@@ -10,6 +10,10 @@ async function record(source) {
   await chrome.storage.local.set({ ticks });
 }
 function start() { chrome.alarms.create('tick', { periodInMinutes: 0.5 }); }
+// Version 3: recorded whenever the browser loads this worker, for any reason,
+// so a start with no event at all still shows whether the extension loaded.
+record('worker loaded');
+if (chrome.idle.onStateChanged) chrome.idle.onStateChanged.addListener(() => record('idle change'));
 chrome.runtime.onInstalled.addListener(() => {
   start();
   record('installed');

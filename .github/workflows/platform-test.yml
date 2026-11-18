@@ -11,30 +11,30 @@ permissions:
 
 jobs:
   test:
-    name: ${{ matrix.os }} / ${{ matrix.browser }} / ${{ matrix.mode }}
+    name: ${{ matrix.os }} / ${{ matrix.browser }} / ${{ matrix.mode }} / ${{ matrix.variant }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: windows-latest, browser: chrome-for-testing, mode: standard }
-          - { os: windows-latest, browser: edge, mode: standard }
-          - { os: windows-latest, browser: chrome-for-testing, mode: signin }
-          - { os: windows-latest, browser: edge, mode: signin }
-          - { os: macos-latest, browser: chrome-for-testing, mode: standard }
-          - { os: macos-latest, browser: edge, mode: standard }
+          # Version 3: Edge after a restart, four ways.
+          - { os: windows-latest, browser: chrome-for-testing, mode: signin, variant: baseline }
+          - { os: windows-latest, browser: edge, mode: signin, variant: baseline }
+          - { os: windows-latest, browser: edge, mode: signin, variant: noboost }
+          - { os: windows-latest, browser: edge, mode: signin, variant: bgmode }
+          - { os: windows-latest, browser: edge, mode: signin, variant: nosessionflag }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Run the test
-        run: python scripts/run_test.py --browser ${{ matrix.browser }} --mode ${{ matrix.mode }}
+        run: python scripts/run_test.py --browser ${{ matrix.browser }} --mode ${{ matrix.mode }} --variant ${{ matrix.variant }}
       - name: Keep the results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: results-${{ matrix.os }}-${{ matrix.browser }}-${{ matrix.mode }}
+          name: results-${{ matrix.os }}-${{ matrix.browser }}-${{ matrix.mode }}-${{ matrix.variant }}
           path: results/
           if-no-files-found: warn

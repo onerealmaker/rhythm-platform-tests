@@ -1,4 +1,4 @@
-"""Rhythm platform test (version 2).
+"""Rhythm platform test (version 3).
 
 Checks, on real Windows and Mac machines, whether a Chrome-type browser keeps
 running an extension that has the "background" permission after its last
@@ -12,6 +12,12 @@ Results go to results/<name>.md and to GitHub annotations on the run.
 Usage:
   python scripts/run_test.py --browser chrome-for-testing|edge|chromium
   python scripts/run_test.py --browser chrome-for-testing|edge --mode signin   (Windows)
+  python scripts/run_test.py --browser edge --mode signin --variant noboost|bgmode|nosessionflag
+
+Version 3 (Edge after a restart): the sign-in start is repeated with Edge's
+"startup boost" turned off (noboost), with background mode turned on by
+policy (bgmode), or without the --win-session-start flag (nosessionflag),
+to find a setting under which Edge runs the extension after sign-in.
 """
 import argparse
 import glob
@@ -260,7 +266,25 @@ def standard(browser, path):
     return checks, notes, ticks
 
 
-def signin(browser, path):
+EDGE_POLICY_KEY = r'HKCU:\Software\Policies\Microsoft\Edge'
+VARIANT_POLICIES = {'noboost': ('StartupBoostEnabled', 0), 'bgmode': ('BackgroundModeEnabled', 1)}
+
+
+def set_policy(variant):
+    if variant not in VARIANT_POLICIES:
+        return
+    name, value = VARIANT_POLICIES[variant]
+    ps(f"New-Item -Path '{EDGE_POLICY_KEY}' -Force | Out-Null; "
+       f"New-ItemProperty -Path '{EDGE_POLICY_KEY}' -Name {name} -Value {value} -PropertyType DWord -Force | Out-Null")
+    log(f'Policy set: {name}={value}')
+
+
+def clear_policy(variant):
+    if variant in VARIANT_POLICIES:
+        ps(f"Remove-ItemProperty -Path '{EDGE_POLICY_KEY}' -Name {VARIANT_POLICIES[variant][0]} -ErrorAction SilentlyContinue")
+
+
+def signin(browser, path, variant='baseline'):
     """Windows only, normal (default) profile, as a real person has it.
 
     1. Start the browser with the test extension; it closes its window.
@@ -273,6 +297,7 @@ def signin(browser, path):
     """
     if SYSTEM != 'windows':
         sys.exit('Sign-in mode is for Windows only')
+    set_policy(variant)
     profile_dir = default_user_data_dir(browser)
     before = run_key_values()
     proc = launch(path)                 # no --user-data-dir: the normal profile
@@ -295,29 +320,37 @@ def signin(browser, path):
         # The way Windows runs a sign-in entry: the stored command, as is.
         parts = shlex.split(entry_cmd, posix=False)
         cmd = [p.strip('"') for p in parts] + ext_flags()
+        if variant == 'nosessionflag':
+            cmd = [p for p in cmd if p != '--win-session-start']
         log('Starting as at sign-in: ' + ' '.join(cmd))
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(150)
+        time.sleep(240)                 # version 3: longer, in case extensions load late
         alive = process_count(exe_marker)
         kill_processes(exe_marker)
         ticks = read_ticks(profile_dir)
         after_signin = [k for k in ticks if k['t'] >= t_signin]
         started_ok = any(k['src'] == 'browser started' for k in after_signin)
+        loaded_ok = len(after_signin) > 0
         no_window = [k for k in after_signin if k['w'] == 0]
     else:
         kill_processes(exe_marker)
         ticks = read_ticks(profile_dir)
         after_signin, no_window = [], []
+        loaded_ok = False
+    clear_policy(variant)
 
     checks = [
         ('Extension loaded and recorded (normal profile)', verdict(len(ticks) > 0)),
         ('Browser added itself to the Windows sign-in list', verdict(bool(new_entries))),
         ('Started the way Windows starts it at sign-in, and still running', verdict(alive > 0)),
         ('Extension running after that start ("browser started" recorded)', verdict(started_ok)),
+        ('Extension loaded after that start (anything recorded)', verdict(loaded_ok)),
         ('After that start: no window opened, kept recording, no gaps over 45 s',
          verdict(len(no_window) >= 4 and len(no_window) == len(after_signin) and not gaps_in(after_signin))),
     ]
-    notes = [f'Sign-in entry: {json.dumps(new_entries) if new_entries else "none"}']
+    notes = [f'Variant: {variant}',
+             f'Sign-in entry: {json.dumps(new_entries) if new_entries else "none"}',
+             'Records after that start: ' + ', '.join(sorted({k["src"] for k in after_signin}) or ['none'])]
     return checks, notes, ticks
 
 
@@ -325,10 +358,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--browser', required=True)
     ap.add_argument('--mode', default='standard', choices=['standard', 'signin'])
+    ap.add_argument('--variant', default='baseline', choices=['baseline', 'noboost', 'bgmode', 'nosessionflag'])
     a = ap.parse_args()
     path = find_browser(a.browser)
-    name = f'{SYSTEM}-{a.browser}' + ('-signin' if a.mode == 'signin' else '')
-    checks, notes, ticks = (signin if a.mode == 'signin' else standard)(a.browser, path)
+    name = f'{SYSTEM}-{a.browser}' + ('-signin' if a.mode == 'signin' else '') + \
+        ('' if a.variant == 'baseline' else f'-{a.variant}')
+    checks, notes, ticks = (signin(a.browser, path, a.variant) if a.mode == 'signin'
+                            else standard(a.browser, path))
     write_report(name, path, checks, notes, ticks)
 
 
