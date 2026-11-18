@@ -266,17 +266,21 @@ def standard(browser, path):
     return checks, notes, ticks
 
 
-EDGE_POLICY_KEY = r'HKCU:\Software\Policies\Microsoft\Edge'
+EDGE_POLICY_KEY = r'HKLM:\Software\Policies\Microsoft\Edge'   # machine-level policy (runners are admin)
 VARIANT_POLICIES = {'noboost': ('StartupBoostEnabled', 0), 'bgmode': ('BackgroundModeEnabled', 1)}
 
 
 def set_policy(variant):
+    """Write the variant's policy and read it back (review 1.2). Returns
+    (wanted, actual) as text, or None for variants without a policy."""
     if variant not in VARIANT_POLICIES:
-        return
+        return None
     name, value = VARIANT_POLICIES[variant]
     ps(f"New-Item -Path '{EDGE_POLICY_KEY}' -Force | Out-Null; "
        f"New-ItemProperty -Path '{EDGE_POLICY_KEY}' -Name {name} -Value {value} -PropertyType DWord -Force | Out-Null")
-    log(f'Policy set: {name}={value}')
+    actual = ps(f"Get-ItemPropertyValue -Path '{EDGE_POLICY_KEY}' -Name {name} -ErrorAction SilentlyContinue").stdout.strip()
+    log(f'Policy {name}: wanted {value}, read back {actual or "nothing"}')
+    return f'{name}={value}', actual
 
 
 def clear_policy(variant):
@@ -297,7 +301,8 @@ def signin(browser, path, variant='baseline'):
     """
     if SYSTEM != 'windows':
         sys.exit('Sign-in mode is for Windows only')
-    set_policy(variant)
+    policy = set_policy(variant)
+    policy_ok = policy is None or policy[1] == policy[0].split('=')[1]
     profile_dir = default_user_data_dir(browser)
     before = run_key_values()
     proc = launch(path)                 # no --user-data-dir: the normal profile
@@ -306,10 +311,17 @@ def signin(browser, path, variant='baseline'):
     after = run_key_values()
     new_entries = {k: v for k, v in after.items() if before.get(k) != v}
     log(f'New sign-in entries: {new_entries}')
+    # Review 1.4: the entry that starts this browser, whether new or already there.
+    exe = os.path.basename(path).lower()
+    own = {k: v for k, v in after.items() if isinstance(v, str) and exe in v.lower()}
+    log(f"This browser's sign-in entries: {own}")
 
     started_ok, alive, entry_cmd = False, 0, ''
-    if new_entries:
-        entry_cmd = next(iter(new_entries.values()))
+    flag_note = 'not applicable'
+    if own:
+        # Several (e.g. the runner's own Chrome besides Chrome for Testing): the one just added first.
+        fresh = [v for k, v in own.items() if k in new_entries]
+        entry_cmd = (fresh or list(own.values()))[0]
         kill_processes(exe_marker)
         try:
             proc.kill()
@@ -321,7 +333,9 @@ def signin(browser, path, variant='baseline'):
         parts = shlex.split(entry_cmd, posix=False)
         cmd = [p.strip('"') for p in parts] + ext_flags()
         if variant == 'nosessionflag':
+            had = '--win-session-start' in cmd
             cmd = [p for p in cmd if p != '--win-session-start']
+            flag_note = 'found and removed' if had else 'NOT in the sign-in command (run is the same as baseline)'
         log('Starting as at sign-in: ' + ' '.join(cmd))
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(240)                 # version 3: longer, in case extensions load late
@@ -341,14 +355,21 @@ def signin(browser, path, variant='baseline'):
 
     checks = [
         ('Extension loaded and recorded (normal profile)', verdict(len(ticks) > 0)),
-        ('Browser added itself to the Windows sign-in list', verdict(bool(new_entries))),
+        ('Browser is in the Windows sign-in list (its own entry)', verdict(bool(own))),
         ('Started the way Windows starts it at sign-in, and still running', verdict(alive > 0)),
         ('Extension running after that start ("browser started" recorded)', verdict(started_ok)),
-        ('Extension loaded after that start (anything recorded)', verdict(loaded_ok)),
+        ('Extension loaded after that start (anything recorded)',
+         verdict(loaded_ok and policy_ok, inconclusive=not policy_ok)),
+        ('Variant took effect (policy read back, or flag removed)',
+         verdict(policy_ok and 'NOT' not in flag_note, inconclusive=True)),
         ('After that start: no window opened, kept recording, no gaps over 45 s',
          verdict(len(no_window) >= 4 and len(no_window) == len(after_signin) and not gaps_in(after_signin))),
     ]
     notes = [f'Variant: {variant}',
+             f'Policy: {"none" if policy is None else policy[0] + ", read back: " + (policy[1] or "nothing")}',
+             f'Session flag: {flag_note}',
+             'If "installed" is among the records after that start, the browser treated the test extension as new; '
+             'a missing "browser started" then comes from the test setup, not from real use.',
              f'Sign-in entry: {json.dumps(new_entries) if new_entries else "none"}',
              'Records after that start: ' + ', '.join(sorted({k["src"] for k in after_signin}) or ['none'])]
     return checks, notes, ticks

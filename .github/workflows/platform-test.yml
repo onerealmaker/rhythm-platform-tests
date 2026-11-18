@@ -18,6 +18,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Version 3 (review 1.5): the window-closed checks again, with the new test extension.
+          - { os: windows-latest, browser: chrome-for-testing, mode: standard, variant: baseline }
+          - { os: windows-latest, browser: edge, mode: standard, variant: baseline }
           # Version 3: Edge after a restart, four ways.
           - { os: windows-latest, browser: chrome-for-testing, mode: signin, variant: baseline }
           - { os: windows-latest, browser: edge, mode: signin, variant: baseline }

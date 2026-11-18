@@ -2,7 +2,11 @@
 // idle state (same call and 60 s threshold as FriendJo Rhythm) and how many
 // browser windows are open. 20 s after install it closes every window, like a
 // person clicking X on the last window.
-async function record(source) {
+// Version 3 (review 1.1): records are saved one after another, so two at
+// once (worker loaded + browser started, or + tick) never overwrite each other.
+let chain = Promise.resolve();
+function record(source) { chain = chain.then(() => doRecord(source)).catch(() => {}); return chain; }
+async function doRecord(source) {
   const state = await chrome.idle.queryState(60);
   const windows = (await chrome.windows.getAll()).length;
   const { ticks = [] } = await chrome.storage.local.get('ticks');
